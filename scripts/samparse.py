@@ -7,8 +7,8 @@ Usage:
  samparse.py -i <FILE> -o <FILE>
 
 Options:
- -i, --infile <FILE>          BAMFILE
- -o, --outfile <FILE>         Output tsv
+ -i, --infile <FILE>          BAM file
+ -o, --outfile <FILE>         parsed BAM tsv
 
 """
 from docopt import docopt
@@ -21,14 +21,15 @@ import pysam
 import numpy as np
 import pandas as pd
 
+def parse_bam(bam_fh, parsed_bam_f="bam_parsed.tsv"):
 
-def samparse(bamfile, outfile="samparse_outfile.tsv"):
+    #convert BAM file into tsv with selected fields and simple coverage metrics
 
-    print("Parsing...")
+    print("parsing...")
     allowed_operations = set([0, 1, 2, 3, 4, 5])
     # 0 = match, 1 = insertion, 2 =  deletion, 3 = ref skip, 4 = soft clip, 5 = hard clip, 6 = pad, 7 = equal, 8 = diff, 9 = back
 
-    with open(str(outfile), "w") as f:
+    with open(str(parsed_bam_f), "w") as f:
         f.write(
             "\t".join(
                 [
@@ -52,12 +53,13 @@ def samparse(bamfile, outfile="samparse_outfile.tsv"):
                         "flag",
                         "AS",
                         "cigar",
+                        "\n"
                     ]
                 ]
             )
         )
 
-    for read in bamfile.fetch(until_eof=True):
+    for read in bam_fh.fetch(until_eof=True):
 
         queryname = read.query_name
 
@@ -119,7 +121,7 @@ def samparse(bamfile, outfile="samparse_outfile.tsv"):
         except IndexError:
             ref_stop = "NA"
 
-        with open(str(outfile), "a") as f:
+        with open(str(parsed_bam_f), "a") as f:
             f.write(
                 "\t".join(
                     [
@@ -149,181 +151,40 @@ def samparse(bamfile, outfile="samparse_outfile.tsv"):
                 )
             )
 
-    print("Done")
+    print("done")
 
 
 # need to think about multiple alignments aligning to the same place
 # and the same alignment in multiple places
 # ref stop-ref start != aln_len
 # print blessed alignment list (id and cov > 0.9)
-# can also filter query, reference, start, and stop for a ghetto bed file after filtering
+# can also filter query, reference, start, and stop for a pseudobed file after filtering
 
-def natsort(l):
-    def convert(text):
-        return int(text) if text.isdigit() else text
+def append_transdecoder_blessed(parsed_bam_f, transdecoder_blessed_tsv_f, bam_transdecoder_appended_f):
 
-    def alphanum_key(key):
-        return [convert(c) for c in re.split(_nsre, key)]
+    #append proteins blessed by transdecoder
 
-    return sorted(l, key=alphanum_key)
+    print("appending transdecoder blessed")
 
+    parsed_bam_df = pd.read_csv(parsed_bam_f, sep="\t", encoding = 'utf8')
 
-def readBed(infile):
-    if not isfile(infile):
-        sys.exit("[X] %s is not a file." % (infile))
-    with open(infile) as fh:
-        for l in fh:
-            if not l.startswith("track"):
-                field = l.split()
-                isoform_id = field[0]
-                protein_id = field[3].split("~")[2].split(";")[0]
-                status = field[3].split(";")[2].split(":")[1].split("_")[0]
-                protein_length = int(field[3].split(":")[2].split("_")[0].split("_")[0])
-                cds_length = protein_length * 3
-                score = float(field[3].split("=")[2].split(",")[0])
-                strand = field[5]
-                start = int(field[6])
-                end = int(field[7])
-                if status == "complete":
-                    if protein_length >= MIN_LENGTH:
-                        if score >= MIN_SCORE:
-                            bedObj = BedObj(
-                                isoform_id,
-                                protein_id,
-                                status,
-                                protein_length,
-                                cds_length,
-                                score,
-                                strand,
-                                start,
-                                end,
-                            )
-                            yield bedObj
+    if transdecoder_blessed_tsv_f:
+        transdecoder_blessed_df = pd.read_csv(transdecoder_blessed_tsv_f, sep="\t")
+        merged_df = pd.merge(parsed_bam_df, transdecoder_blessed_df, on="query_name", how="outer")
+        with open(bam_transdecoder_appended_f, "w") as f:
+            merged_df.to_csv(f, sep="\t", index=False)
 
+    #figure out how to drop unnamed columns        
 
-class BedObj:
-    def __init__(
-        self,
-        isoform_id,
-        protein_id,
-        status,
-        protein_length,
-        cds_length,
-        score,
-        strand,
-        start,
-        end,
-    ):
-        self.isoform_id = isoform_id
-        self.gene_id = "_".join(isoform_id.split("_")[0:4])
-        self.protein_id = protein_id
-        self.status = status
-        self.protein_length = protein_length
-        self.cds_length = cds_length
-        self.score = score
-        self.strand = strand
-        self.start = start
-        self.end = end
+    print("done")
 
-    def bed(self):
-        return "\t".join(
-            [
-                str(x)
-                for x in [
-                    self.isoform_id,
-                    self.start,
-                    self.end,
-                    self.gene_id,
-                    self.score,
-                    self.strand,
-                    self.cds_length,
-                    self.protein_id,
-                ]
-            ]
-        )
+def append_expression_sleuthed(bam_transdecoder_appended_f, TPM_f, EST_f, DE_f, bam_expression_appended_f):
 
-
-class MainObj:
-    def __init__(self):
-        self.bedObjs_by_gene_id = {}
-        self.parse_bed()
-        self.write_bed()
-
-    def parse_bed(self):
-        for bedObj in readBed(BED):
-            # print bedObj.__dict__
-            try:
-                self.bedObjs_by_gene_id[bedObj.gene_id].append(bedObj)
-            except KeyError:
-                self.bedObjs_by_gene_id[bedObj.gene_id] = [bedObj]
-
-    def write_bed(self):
-        for gene_id in natsort(self.bedObjs_by_gene_id):
-            for idx, bedObj in enumerate(
-                sorted(
-                    self.bedObjs_by_gene_id[gene_id],
-                    key=lambda x: (x.score),
-                    reverse=True,
-                )
-            ):
-                if idx >= 1:
-                    break
-                with open("transdecoder_blessed.tsv", "a") as f:
-                    f.write(bedObj.bed() + "\n")
-
-
-# maybe convert function to pandas data frame and then combine with existing data before writing that as an option
-
-
-def postprocess(samparse_tsv, transdecoder_tsv):
-
-    print("postprocessing...")
-
-    samparse_df = pd.read_csv(samparse_tsv, sep="\t")
-
-    with open("unaligned_query_names.txt", "w") as f:
-        samparse_df[samparse_df["reference_name"] == "*"]["query_name"].to_csv(f, index=False)
-
-    # remove unaligned query names
-    samparse_df = samparse_df[samparse_df["reference_name"] != "*"]
-
-    with open("samparse_output_nofails.tsv", "w") as f:
-        samparse_df.to_csv(f, sep="\t", index=False)
-
-    if transdecoder_tsv:
-        transdecoder_blessed_df = pd.read_csv("transdecoder_blessed.tsv", sep="\t")
-        merged_df = pd.merge(samparse_df, transdecoder_blessed_df, on="query_name", how="outer")
-        with open("samparse_output_nofails_transdecoder.tsv", "w") as f:
-            samparse_df.to_csv(f, sep="\t", index=False)
-
-    # save unique isoforms that successfully mapped
-    np.savetxt("uniq_query_isoform_mapped.txt", samparse_df["query_name"].unique(), fmt="%s")
-
-    samparse_df = pd.read_csv("samparse_output_nofails.tsv", sep="\t", index_col=False)
-    unaligned_query_names = samparse_df[samparse_df["reference_name"] == "*"]["query_name"]
-    samparse_df = samparse_df[samparse_df["reference_name"] != "*"]
-
-    transdecoder_blessed_df = pd.read_csv("transdecoder_blessed.tsv", sep="\t")
-    merged_df_1 = pd.merge(samparse_df, transdecoder_blessed_df, on="query_name", how="outer")
-
-    with open("samparse_output_nofails_transdecoder.tsv", "w") as f:
-        merged_df_1.to_csv(f, sep="\t", index=False, na_rep="NA")
-
-    # print files for
-    # queries with no best transdecoder
-    # queries with transdecoder output
-    # transdecoder proteins with no queries
-
-    # target tables obtained after processing sleuth output in R
-    # EST counts is a count table
+    # append expression tables obtained after processing sleuth output in R
     # TPM count is TPM table
+    # EST counts is a count table
     # DE genes differentially expressed genes
     # sexantag file has appended info from other files
-
-    sexantag_TPM = pd.read_csv("kallisto/Kallisto_TPM_table_iphiclides.txt", sep=" ", index_col=False)
-    sexantag_EST = pd.read_csv("kallisto/Kallisto_ESTcounts_table_iphiclides.txt", sep=" ", index_col=False)
-    sexantag_DE = pd.read_csv("kallisto/DEgenes_iphiclides.txt", sep=" ")
-    sexantag_DE = sexantag_DE.rename(columns={"target_id": "Transcript"})
 
     # replace x with tpm and y with est in header
     # test for correct merge
@@ -333,50 +194,81 @@ def postprocess(samparse_tsv, transdecoder_tsv):
     # append to previous by transcript
     # rename for merging
 
-    temp = pd.merge(sexantag_TPM, sexantag_EST, on="Transcript", how="outer")
-    sexantag_merge = pd.merge(temp, sexantag_DE, on="Transcript", how="outer")
+    print("appending expression sleuthed")
 
-    print("Done")
+    bam_transdecoder_appended_df = pd.read_csv(bam_transdecoder_appended_f, sep = "\t")
+    TPM_df = pd.read_csv(TPM_f, sep=" ", index_col=False)
+    EST_df = pd.read_csv(EST_f, sep=" ", index_col=False)
+    DE_df = pd.read_csv(DE_f, sep=" ")
+    DE_df = DE_df.rename(columns={"target_id": "Transcript"})
 
+    temp = pd.merge(TPM_df, EST_df, on="Transcript", how="outer")
+    expression_sleuthed_df = pd.merge(temp, DE_df, on="Transcript", how="outer")
+
+    expression_sleuthed_df = expression_sleuthed_df.rename(columns={'Transcript': 'query_name'})
+    bam_expression_appended_df = pd.merge(bam_transdecoder_appended_df, expression_sleuthed_df, on="query_name", how="outer")
+
+    with open(bam_expression_appended_f, "w") as f:
+        bam_expression_appended_df.to_csv(f, sep="\t", index=False)
+
+    print("done")
+
+def append_orthogroups():
+    #append orthogroups between species and its pair, and labelled single copy orthologs
+    print("appending orthogroups")
+
+def append_orthofinder_putative_duplications():
+    #append orthofinder putative duplications by protein
+    print("appending putatitve duplications")
+
+def quality_control_filtering(df_fh):
+    #filtering and quality control processing
+
+    print("filtering and qc")
+
+    df = pd.read_csv(df_fh, sep="\t")
+
+    #remove unaligned query names
+    df = df[["reference_name"] != "*"]
+
+    #write file with no unaligned queries
+    with open("samparse_output_nofails.tsv", "w") as f:
+        df.to_csv(f, sep="\t", index=False)
+
+    #write list of unaligned queries    
+    with open("unaligned_query_names.txt", "w") as f:
+        df[df["reference_name"] == "*"]["query_name"].to_csv(f, index=False)
+
+    # save unique isoforms that successfully mapped
+    np.savetxt("uniq_query_isoform_mapped.txt", samparse_df["query_name"].unique(), fmt="%s")
+
+    print("done")
+
+    # print files for
+    # queries with no best transdecoder
+    # queries with transdecoder output
+    # transdecoder proteins with no queries
     # could add a tally to isoform count
 
+bam_f = "minimap2/iphiclides_podalirius.IP_504.transcriptome.bam"
+parsed_bam_f = "working_dir/bam_parsed.tsv"
+transdecoder_blessed_tsv_f = "transdecoder/transdecoder_blessed.tsv"
+bam_transdecoder_appended_f = "working_dir/bam_transdecoder_appended.tsv"
+TPM_f = "kallisto/Kallisto_TPM_table_iphiclides.txt"
+EST_f = "kallisto/Kallisto_ESTcounts_table_iphiclides.txt"
+DE_f = "kallisto/DEgenes_iphiclides.txt"
+bam_expression_appended_f = "working_dir/bam_expression_appended.tsv"
 
-_nsre = re.compile("([0-9]+)")
-outfile = "samparse_output.tsv"
-with pysam.AlignmentFile("minimap2/iphiclides_podalirius.IP_504.transcriptome.bam", "rb") as bamfile:
-    samparse(bamfile, outfile)
-
-BED = "./transdecoder/iphiclides_podalirius.trinity.Trinity.fasta.transdecoder.bed"
-MIN_SCORE = float(0)
-MIN_LENGTH = int(30)
-with open("transdecoder_blessed.tsv", "w") as f:
-    f.write(
-        "\t".join(
-            [
-                x
-                for x in [
-                    "query_name",
-                    "start_on_gene",
-                    "stop_on_gene",
-                    "gene_id",
-                    "score",
-                    "strand",
-                    "cds_length",
-                    "protein_id",
-                    "\n",
-                ]
-            ]
-        )
-    )
-
-MainObj()
+#with pysam.AlignmentFile(bam_f, "rb") as bam_fh:
+#    parse_bam(bam_fh, parsed_bam_f)
+#append_transdecoder_blessed(parsed_bam_f, transdecoder_blessed_tsv_f, bam_transdecoder_appended_f)
+#append_expression_sleuthed(bam_transdecoder_appended_f, TPM_f, EST_f, DE_f, bam_expression_appended_f)
+#append_orthogroups()
+#quality_control_filtering(df_f)
 
 
-postprocess(outfile, "transdecoder_blessed.tsv")
 
-#need to atomise code
-#split postprocess into adding on things and filtering things, should just add onto everything as a whole
-#convert bed class into pandas code
+#docopt code
 
 # def main():
 #    args = docopt(__doc__)
@@ -388,13 +280,3 @@ postprocess(outfile, "transdecoder_blessed.tsv")
 #
 # if __name__ == '__main__':
 #    main()
-#
-# if __name__ == "__main__":
-#    _nsre = re.compile('([0-9]+)')
-#    args = docopt(__doc__)
-#
-#    BED = args['--transdecoder_bed']
-#    MIN_SCORE = float(args['--score'])
-#    MIN_LENGTH = int(args['--length'])
-#
-#    MainObj()

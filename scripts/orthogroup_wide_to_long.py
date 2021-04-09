@@ -22,3 +22,5 @@ with open("sp1_orthogroups.txt", "w") as f:
 
 with open("sp2_orthogroups.txt", "w") as f:
         sp2_ortho_df_melt.mask(sp2_ortho_df_melt.eq('None')).dropna().to_csv(f, sep="\t", index=False, na_rep="NA")
+
+        #add SCO label at this stage
