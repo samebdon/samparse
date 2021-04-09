@@ -1,14 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from docopt import docopt
-from matplotlib import pyplot
-from os.path import isfile
-
-import sys
-import re
-import pysam
-import numpy as np
 import pandas as pd
 
 orthogroup_df = pd.read_csv("orthofinder/Orthogroups/Orthogroups.tsv", sep="\t")
