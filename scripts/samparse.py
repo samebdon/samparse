@@ -21,9 +21,10 @@ import pysam
 import numpy as np
 import pandas as pd
 
+
 def parse_bam(bam_fh, parsed_bam_f="bam_parsed.tsv"):
 
-    #convert BAM file into tsv with selected fields and simple coverage metrics
+    # convert BAM file into tsv with selected fields and simple coverage metrics
 
     print("parsing...")
     allowed_operations = set([0, 1, 2, 3, 4, 5])
@@ -53,7 +54,7 @@ def parse_bam(bam_fh, parsed_bam_f="bam_parsed.tsv"):
                         "flag",
                         "AS",
                         "cigar",
-                        "\n"
+                        "\n",
                     ]
                 ]
             )
@@ -160,26 +161,34 @@ def parse_bam(bam_fh, parsed_bam_f="bam_parsed.tsv"):
 # print blessed alignment list (id and cov > 0.9)
 # can also filter query, reference, start, and stop for a pseudobed file after filtering
 
-def append_transdecoder_blessed(parsed_bam_f, transdecoder_blessed_tsv_f, bam_transdecoder_appended_f):
 
-    #append proteins blessed by transdecoder
+def append_transdecoder_blessed(
+    parsed_bam_f, transdecoder_blessed_tsv_f, bam_transdecoder_appended_f
+):
+
+    # append proteins blessed by transdecoder
 
     print("appending transdecoder blessed")
 
-    parsed_bam_df = pd.read_csv(parsed_bam_f, sep="\t", encoding = 'utf8')
+    parsed_bam_df = pd.read_csv(parsed_bam_f, sep="\t", encoding="utf8")
 
     if transdecoder_blessed_tsv_f:
         transdecoder_blessed_df = pd.read_csv(transdecoder_blessed_tsv_f, sep="\t")
-        merged_df = pd.merge(parsed_bam_df, transdecoder_blessed_df, on="query_name", how="outer")
+        merged_df = pd.merge(
+            parsed_bam_df, transdecoder_blessed_df, on="query_name", how="outer"
+        )
         with open(bam_transdecoder_appended_f, "w") as f:
             merged_df.to_csv(f, sep="\t", index=False)
 
     print("done")
 
-    #figure out how to drop unnamed columns   
-    #check proteins properly mapped to isoforms  
+    # figure out how to drop unnamed columns
+    # check proteins properly mapped to isoforms
 
-def append_expression_sleuthed(bam_transdecoder_appended_f, TPM_f, EST_f, DE_f, bam_expression_appended_f):
+
+def append_expression_sleuthed(
+    bam_transdecoder_appended_f, TPM_f, EST_f, DE_f, bam_expression_appended_f
+):
 
     # append expression tables obtained after processing sleuth output in R
     # TPM count is TPM table
@@ -189,7 +198,7 @@ def append_expression_sleuthed(bam_transdecoder_appended_f, TPM_f, EST_f, DE_f, 
 
     print("appending expression sleuthed")
 
-    bam_transdecoder_appended_df = pd.read_csv(bam_transdecoder_appended_f, sep = "\t")
+    bam_transdecoder_appended_df = pd.read_csv(bam_transdecoder_appended_f, sep="\t")
     TPM_df = pd.read_csv(TPM_f, sep=" ", index_col=False)
     EST_df = pd.read_csv(EST_f, sep=" ", index_col=False)
     DE_df = pd.read_csv(DE_f, sep=" ")
@@ -198,8 +207,15 @@ def append_expression_sleuthed(bam_transdecoder_appended_f, TPM_f, EST_f, DE_f, 
     temp = pd.merge(TPM_df, EST_df, on="Transcript", how="outer")
     expression_sleuthed_df = pd.merge(temp, DE_df, on="Transcript", how="outer")
 
-    expression_sleuthed_df = expression_sleuthed_df.rename(columns={'Transcript': 'query_name'})
-    bam_expression_appended_df = pd.merge(bam_transdecoder_appended_df, expression_sleuthed_df, on="query_name", how="outer")
+    expression_sleuthed_df = expression_sleuthed_df.rename(
+        columns={"Transcript": "query_name"}
+    )
+    bam_expression_appended_df = pd.merge(
+        bam_transdecoder_appended_df,
+        expression_sleuthed_df,
+        on="query_name",
+        how="outer",
+    )
 
     with open(bam_expression_appended_f, "w") as f:
         bam_expression_appended_df.to_csv(f, sep="\t", index=False)
@@ -214,49 +230,72 @@ def append_expression_sleuthed(bam_transdecoder_appended_f, TPM_f, EST_f, DE_f, 
     # append to previous by transcript
     # rename for merging
 
-def append_orthogroups(bam_expression_appended_f, orthogroups_f, bam_orthogroups_appended_f):
-    #append orthogroups between species and its pair, and labelled single copy orthologs
+
+def append_orthogroups(
+    bam_expression_appended_f, orthogroups_f, bam_orthogroups_appended_f
+):
+    # append orthogroups between species and its pair, and labelled single copy orthologs
     print("appending orthogroups")
 
-    bam_expression_appended_df = pd.read_csv(bam_expression_appended_f, sep = "\t")
-    orthogroups_df = pd.read_csv(orthogroups_f, sep = "\t")
-    orthogroups_df[['species','query_name','isoform_protein_number']] = orthogroups_df['protein_name'].str.split('.',expand=True)
-    bam_orthogroups_appended_df = pd.merge(bam_expression_appended_df, orthogroups_df[['orthogroup','orthogroup_protein_number','SCO_index','query_name','isoform_protein_number']], on="query_name", how="outer")
+    bam_expression_appended_df = pd.read_csv(bam_expression_appended_f, sep="\t")
+    orthogroups_df = pd.read_csv(orthogroups_f, sep="\t")
+    orthogroups_df[
+        ["species", "query_name", "isoform_protein_number"]
+    ] = orthogroups_df["protein_name"].str.split(".", expand=True)
+    bam_orthogroups_appended_df = pd.merge(
+        bam_expression_appended_df,
+        orthogroups_df[
+            [
+                "orthogroup",
+                "orthogroup_protein_number",
+                "SCO_index",
+                "query_name",
+                "isoform_protein_number",
+            ]
+        ],
+        on="query_name",
+        how="outer",
+    )
 
     with open(bam_orthogroups_appended_f, "w") as f:
-        bam_orthogroups_appended_df.to_csv(f, sep = "\t", index=False)
+        bam_orthogroups_appended_df.to_csv(f, sep="\t", index=False)
 
     print("done")
 
-    #check proteins properly mapped to isoforms  
+    # check proteins properly mapped to isoforms
+
 
 def append_orthofinder_putative_duplications():
-    #append orthofinder putative duplications by protein
+    # append orthofinder putative duplications by protein
     print("appending putatitve duplications")
+
 
 def append_sex_linkage():
     print("appending sex linkage")
 
+
 def quality_control_filtering(df_fh):
-    #filtering and quality control processing
+    # filtering and quality control processing
 
     print("filtering and qc")
 
     df = pd.read_csv(df_fh, sep="\t")
 
-    #remove unaligned query names
+    # remove unaligned query names
     df = df[["reference_name"] != "*"]
 
-    #write file with no unaligned queries
+    # write file with no unaligned queries
     with open("samparse_output_nofails.tsv", "w") as f:
         df.to_csv(f, sep="\t", index=False)
 
-    #write list of unaligned queries    
+    # write list of unaligned queries
     with open("unaligned_query_names.txt", "w") as f:
         df[df["reference_name"] == "*"]["query_name"].to_csv(f, index=False)
 
     # save unique isoforms that successfully mapped
-    np.savetxt("uniq_query_isoform_mapped.txt", samparse_df["query_name"].unique(), fmt="%s")
+    np.savetxt(
+        "uniq_query_isoform_mapped.txt", samparse_df["query_name"].unique(), fmt="%s"
+    )
 
     print("done")
 
@@ -265,6 +304,7 @@ def quality_control_filtering(df_fh):
     # queries with transdecoder output
     # transdecoder proteins with no queries
     # could add a tally to isoform count
+
 
 bam_f = "minimap2/iphiclides_podalirius.IP_504.transcriptome.bam"
 parsed_bam_f = "working_dir/bam_parsed.tsv"
@@ -277,16 +317,15 @@ bam_expression_appended_f = "working_dir/bam_expression_appended.tsv"
 orthogroups_f = "orthofinder/sp2_orthogroups.txt"
 bam_orthogroups_appended_f = "working_dir/bam_orthogroups_appended.tsv"
 
-#with pysam.AlignmentFile(bam_f, "rb") as bam_fh:
+# with pysam.AlignmentFile(bam_f, "rb") as bam_fh:
 #    parse_bam(bam_fh, parsed_bam_f)
-#append_transdecoder_blessed(parsed_bam_f, transdecoder_blessed_tsv_f, bam_transdecoder_appended_f)
-#append_expression_sleuthed(bam_transdecoder_appended_f, TPM_f, EST_f, DE_f, bam_expression_appended_f)
+# append_transdecoder_blessed(parsed_bam_f, transdecoder_blessed_tsv_f, bam_transdecoder_appended_f)
+# append_expression_sleuthed(bam_transdecoder_appended_f, TPM_f, EST_f, DE_f, bam_expression_appended_f)
 append_orthogroups(bam_expression_appended_f, orthogroups_f, bam_orthogroups_appended_f)
-#quality_control_filtering(df_f)
+# quality_control_filtering(df_f)
 
 
-
-#docopt code
+# docopt code
 
 # def main():
 #    args = docopt(__doc__)
